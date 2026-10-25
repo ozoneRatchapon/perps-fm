@@ -341,7 +341,7 @@ fn save_checkpoint(
         "best_val_crps": val_crps,
     });
     std::fs::write(
-        dir.join("transformer.meta.json"),
+        dir.join(format!("{}.meta.json", cfg.model.model_str())),
         serde_json::to_string_pretty(&meta)?,
     )?;
     Ok(())
@@ -392,15 +392,26 @@ pub fn train() -> Result<()> {
 /// Run the trained checkpoint over `[lo, hi)` for the given markets and write
 /// per-market prediction parquet files (ts + quantiles, ascending).
 /// Sealed weeks are never passed here except by the final evaluation.
-pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<(Market, usize)>> {
+pub fn predict(
+    root: &Path,
+    model_kind: ModelKind,
+    markets: &[Market],
+    lo: i64,
+    hi: i64,
+) -> Result<Vec<(Market, usize)>> {
     let dev = pick_device(DeviceChoice::Auto)?;
     let all: Vec<dataset::MarketSeries> = Market::ALL
         .iter()
         .map(|m| dataset::load_series(root, *m))
         .collect::<Result<Vec<_>>>()?;
-    let tmeta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        root.join("runs/transformer.meta.json"),
-    )?)?;
+    let meta_path = root.join(format!("runs/{}.meta.json", model_kind.model_str()));
+    let tmeta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)
+        .with_context(|| format!("read {}", meta_path.display()))?;
+    // the meta records which checkpoint file won on val — load exactly that
+    let ckpt_name = tmeta["checkpoint"]
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("{}.safetensors", model_kind.model_str()));
     let tcfg: TransformerConfig = serde_json::from_value(tmeta["model_config"].clone())?;
     // NOTE: VarMap::load only fills vars ALREADY REGISTERED in the map —
     // build the model first, then load (an empty map loads as a no-op).
@@ -433,7 +444,9 @@ pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<
             Net::S4d(s4d::Net::new(&scfg, 4, n_features, 2, vs)?)
         }
     };
-    varmap.load(latest_checkpoint(root).context("no checkpoint in runs/")?)?;
+    varmap
+        .load(root.join("runs").join(&ckpt_name))
+        .with_context(|| format!("load checkpoint {ckpt_name}"))?;
 
     let mut written = Vec::new();
     for m in markets {

@@ -58,6 +58,9 @@ enum Cmd {
     },
     /// Run the trained checkpoint over a time range, writing predictions.
     Predict {
+        /// Which trained model to use.
+        #[arg(long, value_enum, default_value_t = perpsfm_train::ModelKind::Transformer)]
+        model: perpsfm_train::ModelKind,
         /// Range start (UTC, YYYY-MM-DD). Default: val-split start.
         #[arg(long)]
         from: Option<String>,
@@ -117,7 +120,7 @@ fn main() -> Result<()> {
                 perpsfm_ingest::ws::CollectorOpts { orderbook_grouping },
             ))
         }
-        Cmd::Predict { from, to } => {
+        Cmd::Predict { model, from, to } => {
             let all: Vec<perpsfm_train::dataset::MarketSeries> = perpsfm_core::Market::ALL
                 .iter()
                 .map(|m| perpsfm_train::dataset::load_series(&cli.root, *m))
@@ -136,7 +139,7 @@ fn main() -> Result<()> {
                 perpsfm_core::Market::HypePerp,
                 perpsfm_core::Market::EthPerp,
             ];
-            let written = perpsfm_train::predict(&cli.root, &markets, lo, hi)?;
+            let written = perpsfm_train::predict(&cli.root, model, &markets, lo, hi)?;
             tracing::info!("predictions written: {written:?}");
             Ok(())
         }
