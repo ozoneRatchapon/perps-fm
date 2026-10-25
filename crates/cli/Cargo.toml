@@ -1,0 +1,26 @@
+[package]
+name = "perpsfm-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "perpsfm"
+path = "src/main.rs"
+
+[dependencies]
+perpsfm-core.workspace = true
+perpsfm-ingest.workspace = true
+perpsfm-features.workspace = true
+perpsfm-train.workspace = true
+perpsfm-backtest.workspace = true
+perpsfm-eval.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+candle-core.workspace = true
+
+[features]
+metal = ["perpsfm-train/metal"]
