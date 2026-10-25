@@ -67,6 +67,7 @@ impl Default for TrainConfig {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, clap::ValueEnum,
 )]
+#[serde(rename_all = "lowercase")]
 pub enum ModelKind {
     Transformer,
     S4d,
@@ -401,8 +402,9 @@ pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<
         root.join("runs/transformer.meta.json"),
     )?)?;
     let tcfg: TransformerConfig = serde_json::from_value(tmeta["model_config"].clone())?;
+    // NOTE: VarMap::load only fills vars ALREADY REGISTERED in the map —
+    // build the model first, then load (an empty map loads as a no-op).
     let mut varmap = VarMap::new();
-    varmap.load(latest_checkpoint(root).context("no checkpoint in runs/")?)?;
 
     // Same normalization rule as training: train-split stats over pooled
     // train markets, applied unchanged (no re-estimation at predict time).
@@ -431,6 +433,7 @@ pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<
             Net::S4d(s4d::Net::new(&scfg, 4, n_features, 2, vs)?)
         }
     };
+    varmap.load(latest_checkpoint(root).context("no checkpoint in runs/")?)?;
 
     let mut written = Vec::new();
     for m in markets {
