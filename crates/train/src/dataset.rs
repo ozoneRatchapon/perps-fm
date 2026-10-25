@@ -30,8 +30,19 @@ impl MarketSeries {
 }
 
 fn read_f64_col(path: &Path, col: &str) -> Result<(Vec<i64>, Vec<f64>)> {
-    let (ts, mut rows) = read_f64_cols(path, &[col])?;
-    Ok((ts, rows.pop().unwrap_or_default()))
+    let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let df = ParquetReader::new(file)
+        .finish()
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+    let ts: Vec<i64> = df.column("ts")?.i64()?.into_no_null_iter().collect();
+    let v: Vec<f64> = df
+        .column(col)
+        .map_err(|e| anyhow::anyhow!("col {col} in {}: {e}", path.display()))?
+        .f64()?
+        .into_no_null_iter()
+        .collect();
+    anyhow::ensure!(v.len() == ts.len(), "col {col} length mismatch in {path:?}");
+    Ok((ts, v))
 }
 
 fn read_f64_cols(path: &Path, cols: &[&str]) -> Result<(Vec<i64>, Vec<Vec<f64>>)> {

@@ -172,24 +172,23 @@ impl Client {
     }
 
     /// Exchange-wide liquidation events over the last `days` days (max 100).
+    /// The endpoint rejects `page` — it returns one large page.
     pub fn liquidations(&self, days: u32) -> Result<Vec<Liquidation>> {
-        let mut out = Vec::new();
-        let mut page = 1u64;
-        loop {
-            let path = format!("/stats/liquidations?days={days}&page={page}");
-            let v = self.get_json(&path)?;
-            let raw: Vec<serde_json::Value> = parse_records(&v)?;
-            let n = raw.len();
-            out.extend(raw);
-            if n == 0 || !has_next_page(&v) {
-                break;
-            }
-            page += 1;
-            if page > 500 {
-                bail!("pagination runaway for {path}");
-            }
+        let path = format!("/stats/liquidations?days={days}");
+        let v = self.get_json(&path)?;
+        let raw: Vec<serde_json::Value> = parse_records(&v)?;
+        let total = v
+            .get("meta")
+            .and_then(|m| m.get("totalRecords"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        if total > raw.len() as u64 {
+            tracing::warn!(
+                "liquidations truncated: got {} of {total} (no pagination support)",
+                raw.len()
+            );
         }
-        Ok(out
+        Ok(raw
             .into_iter()
             .filter_map(|v| serde_json::from_value::<ApiLiquidation>(v).ok())
             .map(|l| l.into_curated())
@@ -406,14 +405,24 @@ struct ApiLiquidation {
     market: Option<String>,
     #[serde(default)]
     market_symbol: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "liquidatePerp_marketIndex", default)]
+    liquidate_perp_market_index: Option<i64>,
+    #[serde(rename = "liquidatePerp_baseAssetAmount", default)]
     base_asset_amount: Option<F64>,
-    #[serde(default)]
+    #[serde(rename = "liquidatePerp_quoteAssetAmount", default)]
     quote_asset_amount: Option<F64>,
 }
 
 impl ApiLiquidation {
     fn into_curated(self) -> Liquidation {
+        // perp market index -> symbol (Velocity mainnet perp indexes)
+        let by_index = |i: i64| match i {
+            0 => Some("SOL-PERP".to_string()),
+            1 => Some("BTC-PERP".to_string()),
+            2 => Some("ETH-PERP".to_string()),
+            3 => Some("HYPE-PERP".to_string()),
+            _ => None,
+        };
         Liquidation {
             ts: self.ts,
             liquidation_type: self.liquidation_type.unwrap_or_default(),
@@ -424,7 +433,10 @@ impl ApiLiquidation {
                 .map(|v| v.inner())
                 .unwrap_or(f64::NAN),
             total_collateral: self.total_collateral.map(|v| v.inner()).unwrap_or(f64::NAN),
-            market_symbol: self.market_symbol.or(self.market),
+            market_symbol: self
+                .market_symbol
+                .or(self.market)
+                .or(self.liquidate_perp_market_index.and_then(by_index)),
             base_amount: self.base_asset_amount.map(|v| v.inner()),
             quote_amount: self.quote_asset_amount.map(|v| v.inner()),
         }
@@ -446,5 +458,29 @@ mod tests {
         let b: F64 = serde_json::from_value(serde_json::json!("1.5")).unwrap();
         assert_eq!(a.inner(), 1.5);
         assert_eq!(b.inner(), 1.5);
+    }
+}
+
+#[cfg(test)]
+mod liquidation_tests {
+    use super::*;
+
+    #[test]
+    fn parses_liquidate_perp_fields() {
+        let j = serde_json::json!({
+            "ts": 1792854992,
+            "liquidationType": "liquidateSpot",
+            "user": "u",
+            "liquidator": "l",
+            "marginRequirement": "23.748226",
+            "totalCollateral": "23.746595",
+            "liquidatePerp_marketIndex": 0,
+            "liquidatePerp_baseAssetAmount": "0.000000000",
+            "liquidatePerp_quoteAssetAmount": "0.000000"
+        });
+        let a: ApiLiquidation = serde_json::from_value(j).unwrap();
+        let c = a.into_curated();
+        assert_eq!(c.market_symbol.as_deref(), Some("SOL-PERP"));
+        assert_eq!(c.quote_amount, Some(0.0));
     }
 }
