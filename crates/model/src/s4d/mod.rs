@@ -12,7 +12,7 @@
 //! blow up. Init is S4D-LegS-like: |A| = 1/2, frequencies spread over [0, pi).
 
 use candle_core::{DType, Result, Tensor, D};
-use candle_nn::{linear, Linear, Module, VarBuilder, VarMap};
+use candle_nn::{linear, Linear, VarBuilder, VarMap};
 
 #[derive(Debug, Clone)]
 pub struct S4dConfig {
@@ -38,7 +38,7 @@ fn softplus(x: &Tensor) -> Result<Tensor> {
     // log(1 + exp(x)), numerically stable
     let one = x.ones_like()?;
     let exp_neg = x.neg()?.exp()?;
-    (x.maximum(&(&one * 0.0)?)? + (&one + exp_neg)?.log()?)
+    x.maximum(&(&one * 0.0)?)? + (&one + exp_neg)?.log()?
 }
 
 pub struct S4dBlock {

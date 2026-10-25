@@ -1,5 +1,6 @@
 {
-  "best_val_crps": 0.010579742473998597,
+  "best_val_crps": 0.048789770562684937,
+  "checkpoint": "transformer-20261025-111449.safetensors",
   "model": "transformer",
   "model_config": {
     "d_model": 64,

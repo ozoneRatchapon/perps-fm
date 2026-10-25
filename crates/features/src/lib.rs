@@ -151,10 +151,11 @@ pub fn build_features(root: &Path, market: Market) -> Result<()> {
         if let Some((m, sd)) = vol_stats.push(qv[i]) {
             vol_z_30m[i] = if sd > 0.0 { (qv[i] - m) / sd } else { 0.0 };
         }
-        let (_, bv) = bvol.push(buy_vol[i]).unwrap_or((0, 0.0));
-        let (_, sv) = svol.push(sell_vol[i]).unwrap_or((0, 0.0));
-        let (_, bc) = bcnt.push(buy_cnt[i]).unwrap_or((0, 0.0));
-        let (_, sc) = scnt.push(sell_cnt[i]).unwrap_or((0, 0.0));
+        // sums of non-negative quantities; clamp away f64 drift near zero
+        let bv = bvol.push(buy_vol[i]).unwrap_or((0, 0.0)).1.max(0.0);
+        let sv = svol.push(sell_vol[i]).unwrap_or((0, 0.0)).1.max(0.0);
+        let bc = bcnt.push(buy_cnt[i]).unwrap_or((0, 0.0)).1.max(0.0);
+        let sc = scnt.push(sell_cnt[i]).unwrap_or((0, 0.0)).1.max(0.0);
         let denom = bv + sv;
         ofi_30m[i] = if denom > 0.0 { (bv - sv) / denom } else { 0.0 };
         let cden = bc + sc;

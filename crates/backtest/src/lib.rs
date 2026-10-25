@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::policy::{DecisionCtx, Policy};
 use perpsfm_core::Market;
-use sim::{Action, SimState};
+use sim::SimState;
 
 /// Fee in bps per taker side (observed taker_fee / quote_amount in fills).
 pub const TAKER_FEE_BPS: f64 = 2.0;
