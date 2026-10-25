@@ -53,6 +53,8 @@ enum Cmd {
         seq_len: usize,
         #[arg(long, default_value_t = 64)]
         batch: usize,
+        #[arg(long, value_enum, default_value_t = perpsfm_train::ModelKind::Transformer)]
+        model: perpsfm_train::ModelKind,
     },
     /// Run the trained checkpoint over a time range, writing predictions.
     Predict {
@@ -148,11 +150,13 @@ fn main() -> Result<()> {
             steps,
             seq_len,
             batch,
+            model,
         } => {
             let cfg = perpsfm_train::TrainConfig {
                 steps,
                 seq_len,
                 batch_size: batch,
+                model,
                 ..Default::default()
             };
             let out = perpsfm_train::train_transformer(&cli.root, &cfg)?;

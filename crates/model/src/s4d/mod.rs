@@ -155,6 +155,92 @@ impl S4dBlock {
     }
 }
 
+/// S4D network: input projection -> stacked S4D blocks -> heads, matching
+/// the transformer's I/O contract (same head layout, same param budget goal).
+pub struct Net {
+    proj_in: candle_nn::Linear,
+    market_emb: candle_nn::Embedding,
+    blocks: Vec<S4dBlock>,
+    ln_f: candle_nn::LayerNorm,
+    head_binary: candle_nn::Linear,
+    head_loc: candle_nn::Linear,
+    head_quant: candle_nn::Linear,
+    pub n_params_estimate: usize,
+}
+
+impl Net {
+    pub fn init_vars(
+        cfg: &S4dConfig,
+        n_markets: usize,
+        n_features: usize,
+        n_blocks: usize,
+        varmap: &VarMap,
+        dev: &candle_core::Device,
+    ) -> Result<()> {
+        S4dBlock::init_vars(cfg, varmap, dev)?;
+        // heads/emb/proj are created through VarBuilder with default inits,
+        // which registers them in the VarMap on first access.
+        let _ = (n_markets, n_features, n_blocks);
+        Ok(())
+    }
+
+    pub fn new(
+        cfg: &S4dConfig,
+        n_markets: usize,
+        n_features: usize,
+        n_blocks: usize,
+        vs: VarBuilder,
+    ) -> Result<Self> {
+        use candle_nn::{embedding, layer_norm, linear};
+        let d = cfg.d_model;
+        let blocks = (0..n_blocks)
+            .map(|i| S4dBlock::new(cfg.clone(), vs.pp(format!("block_{i}"))))
+            .collect::<Result<Vec<_>>>()?;
+        // estimate params: ssm (4*(C*S) + C) per block + linears
+        let per_block = 4 * d * cfg.d_state + d + 2 * d * d;
+        Ok(Self {
+            proj_in: linear(n_features, d, vs.pp("proj_in"))?,
+            market_emb: candle_nn::embedding(n_markets, d, vs.pp("market_emb"))?,
+            blocks,
+            ln_f: layer_norm(d, 1e-5, vs.pp("ln_f"))?,
+            head_binary: linear(d, 2, vs.pp("head_binary"))?,
+            head_loc: linear(d, 1, vs.pp("head_loc"))?,
+            head_quant: linear(d, crate::QUANTILES.len(), vs.pp("head_quant"))?,
+            n_params_estimate: n_blocks * per_block
+                + d * n_features
+                + d * n_markets
+                + d * (2 + 1 + crate::QUANTILES.len()),
+        })
+    }
+}
+
+impl crate::QuantileNet for Net {
+    fn forward(
+        &self,
+        x: &candle_core::Tensor,
+        market_ids: &candle_core::Tensor,
+    ) -> Result<crate::transformer::TransformerOutput> {
+        use candle_nn::Module;
+        let mut h = x.apply(&self.proj_in)?;
+        let emb = market_ids.apply(&self.market_emb)?.unsqueeze(1)?;
+        h = h.broadcast_add(&emb)?;
+        for b in &self.blocks {
+            h = b.forward(&h)?;
+        }
+        let last = h
+            .narrow(1, h.dim(1)? - 1, 1)?
+            .squeeze(1)?
+            .apply(&self.ln_f)?;
+        Ok(crate::transformer::TransformerOutput {
+            binary_logits: last.apply(&self.head_binary)?,
+            ret_loc: last
+                .apply(&self.head_loc)?
+                .squeeze(candle_core::D::Minus1)?,
+            ret_quantiles: last.apply(&self.head_quant)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
