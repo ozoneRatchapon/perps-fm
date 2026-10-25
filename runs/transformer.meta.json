@@ -1,6 +1,6 @@
 {
-  "best_val_crps": 0.022038313813283653,
-  "checkpoint": "transformer-20261025-112256.safetensors",
+  "best_val_crps": 0.05536633994175381,
+  "checkpoint": "transformer-20261025-120826.safetensors",
   "model": "transformer",
   "model_config": {
     "d_model": 64,
@@ -22,10 +22,10 @@
     "batch_size": 64,
     "eval_every": 250,
     "lr": 0.0003,
-    "model": "Transformer",
+    "model": "transformer",
     "patience": 6,
     "seed": 42,
     "seq_len": 256,
-    "steps": 4000
+    "steps": 12000
   }
 }

@@ -109,8 +109,8 @@ pub fn report(root: &Path, min_edge: f64, exposure: f64) -> Result<()> {
         TAKER_FEE_BPS, BASE_SLIPPAGE_BPS
     );
     println!(
-        "{:<10} {:>6} {:>10} {:>8} {:>8} {:>7}  {:>22}",
-        "market", "trades", "return", "sharpe", "mdd", "hit%", "daily-ret 95% CI"
+        "{:<10} {:>6} {:>10} {:>8} {:>8}  {:>22}",
+        "market", "trades", "return", "sharpe", "mdd", "daily-ret 95% CI"
     );
     for market in Market::ALL {
         let Ok(preds) = load_predictions(root, market) else {
@@ -146,13 +146,12 @@ pub fn report(root: &Path, min_edge: f64, exposure: f64) -> Result<()> {
         let sharpe = metrics::sharpe(&rets);
         let mdd = metrics::max_drawdown(&st.equity_curve);
         println!(
-            "{:<10} {:>6} {:>9.2}% {:>8.2} {:>8.2} {:>7.1}  {:>6.2e} [{:>6.2e}, {:>6.2e}]",
+            "{:<10} {:>6} {:>9.2}% {:>8.2} {:>8.2}  {:>6.2e} [{:>6.2e}, {:>6.2e}]",
             market.symbol(),
             st.trades,
             total * 100.0,
             sharpe,
             mdd * 100.0,
-            if st.trades > 0 { 100.0 } else { 0.0 },
             point,
             lo,
             hi
