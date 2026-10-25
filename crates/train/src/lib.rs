@@ -7,6 +7,7 @@ pub mod dataset;
 use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Module, Optimizer, VarBuilder, VarMap};
+use polars::prelude::*;
 use rand::SeedableRng;
 use std::path::{Path, PathBuf};
 
@@ -302,4 +303,98 @@ pub fn eval_crps(
 /// Placeholder kept for CLI wiring until the `Train` subcommand lands.
 pub fn train() -> Result<()> {
     anyhow::bail!("use train_transformer(root, cfg) via the CLI train subcommand")
+}
+
+/// Run the trained checkpoint over `[lo, hi)` for the given markets and write
+/// per-market prediction parquet files (ts + quantiles, ascending).
+/// Sealed weeks are never passed here except by the final evaluation.
+pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<(Market, usize)>> {
+    let dev = pick_device(DeviceChoice::Auto)?;
+    let all: Vec<dataset::MarketSeries> = Market::ALL
+        .iter()
+        .map(|m| dataset::load_series(root, *m))
+        .collect::<Result<Vec<_>>>()?;
+    let tmeta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        root.join("runs/transformer.meta.json"),
+    )?)?;
+    let tcfg: TransformerConfig = serde_json::from_value(tmeta["model_config"].clone())?;
+    let mut varmap = VarMap::new();
+    varmap.load(root.join("runs/transformer.safetensors"))?;
+
+    // Same normalization rule as training: train-split stats over pooled
+    // train markets, applied unchanged (no re-estimation at predict time).
+    let train_markets = [Market::SolPerp, Market::HypePerp, Market::EthPerp];
+    let splits = dataset::default_splits(&all);
+    let stats = dataset::norm_stats(
+        &all.iter()
+            .filter(|s| train_markets.contains(&s.market))
+            .collect::<Vec<_>>(),
+        splits.train_start.timestamp(),
+        splits.train_end.timestamp(),
+    );
+
+    let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
+    let model = perpsfm_model::transformer::TinyTransformer::new(&tcfg, vs)?;
+    let n_features = all[0].n_features();
+
+    let mut written = Vec::new();
+    for m in markets {
+        let Some(s) = all.iter().find(|s| &s.market == m) else {
+            continue;
+        };
+        let norm = dataset::normalize(s, &stats);
+        let samples = dataset::collect_slices_samples(&norm, tcfg.seq_len, lo, hi);
+        anyhow::ensure!(
+            !samples.is_empty(),
+            "no predict samples for {m:?} in [{lo},{hi})"
+        );
+        let mut ts_out: Vec<i64> = Vec::with_capacity(samples.len());
+        let mut q_out: Vec<Vec<f64>> = Vec::with_capacity(samples.len());
+        let mut p_liq: Vec<f64> = Vec::with_capacity(samples.len());
+        let mut p_vol: Vec<f64> = Vec::with_capacity(samples.len());
+        for chunk_start in (0..samples.len()).step_by(256) {
+            let end = (chunk_start + 256).min(samples.len());
+            let batch = dataset::gather_window_batch(
+                &norm,
+                &samples[chunk_start..end],
+                tcfg.seq_len,
+                n_features,
+            );
+            let bt = to_device(&batch, n_features, tcfg.seq_len, &dev)?;
+            let out = model.forward(&bt.x, &bt.market_ids)?;
+            let q = out.ret_quantiles.to_vec2::<f32>()?;
+            let logits = out.binary_logits.to_vec2::<f32>()?;
+            for (i, row) in q.iter().enumerate() {
+                ts_out.push(s.ts[samples[chunk_start + i].t]);
+                q_out.push(row.iter().map(|&v| v as f64).collect());
+                // sigmoid of logits: [liq_burst, vol_burst]
+                let sig = |x: f32| 1.0 / (1.0 + (-x).exp());
+                p_liq.push(sig(logits[i][0]) as f64);
+                p_vol.push(sig(logits[i][1]) as f64);
+            }
+        }
+
+        let mut df = df! {
+            "ts" => ts_out.clone(),
+        }
+        .map_err(|e| anyhow::anyhow!("predict ts df: {e}"))?;
+        for qi in 0..QUANTILES.len() {
+            let col: Vec<f64> = q_out.iter().map(|r| r[qi]).collect();
+            df.with_column(Series::new(PlSmallStr::from(format!("q{qi}")), col).into_column())
+                .map_err(|e| anyhow::anyhow!("predict q df: {e}"))?;
+        }
+        df.with_column(Series::new(PlSmallStr::from("p_liq"), p_liq.clone()).into_column())
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        df.with_column(Series::new(PlSmallStr::from("p_vol"), p_vol.clone()).into_column())
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let path = perpsfm_core::predictions_path(root, *m);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let f = std::fs::File::create(&path)?;
+        ParquetWriter::new(f).finish(&mut df)?;
+        tracing::info!("{m:?}: wrote {} predictions", ts_out.len());
+        written.push((*m, ts_out.len()));
+    }
+    Ok(written)
 }

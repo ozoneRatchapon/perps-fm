@@ -2411,6 +2411,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "perpsfm-core",
+ "perpsfm-eval",
  "polars",
  "tracing",
 ]
@@ -2449,8 +2450,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "perpsfm-core",
+ "perpsfm-features",
+ "perpsfm-model",
  "polars",
  "rand 0.9.5",
+ "serde_json",
  "tracing",
 ]
 

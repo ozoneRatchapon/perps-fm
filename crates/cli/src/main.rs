@@ -54,10 +54,24 @@ enum Cmd {
         #[arg(long, default_value_t = 64)]
         batch: usize,
     },
+    /// Run the trained checkpoint over a time range, writing predictions.
+    Predict {
+        /// Range start (UTC, YYYY-MM-DD). Default: val-split start.
+        #[arg(long)]
+        from: Option<String>,
+        /// Range end (UTC, YYYY-MM-DD). Default: now minus 1 day.
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Evaluate on val/sealed splits (Phase 5).
     Evaluate,
-    /// Backtest policies after costs (Phase 4).
-    Backtest,
+    /// Backtest policies after costs on predictions.
+    Backtest {
+        #[arg(long, default_value_t = 0.0)]
+        min_edge: f64,
+        #[arg(long, default_value_t = 1.0)]
+        exposure: f64,
+    },
 }
 
 fn parse_date(s: &str) -> Result<DateTime<Utc>> {
@@ -101,7 +115,35 @@ fn main() -> Result<()> {
                 perpsfm_ingest::ws::CollectorOpts { orderbook_grouping },
             ))
         }
-        Cmd::Features => perpsfm_features::build_features(&cli.root, perpsfm_core::Market::SolPerp),
+        Cmd::Predict { from, to } => {
+            let all: Vec<perpsfm_train::dataset::MarketSeries> = perpsfm_core::Market::ALL
+                .iter()
+                .map(|m| perpsfm_train::dataset::load_series(&cli.root, *m))
+                .collect::<Result<Vec<_>>>()?;
+            let splits = perpsfm_train::dataset::default_splits(&all);
+            let lo = match from {
+                Some(s) => parse_date(&s)?.timestamp(),
+                None => splits.val_start.timestamp(),
+            };
+            let hi = match to {
+                Some(s) => parse_date(&s)?.timestamp(),
+                None => Utc::now().timestamp() - 86400,
+            };
+            let markets = vec![
+                perpsfm_core::Market::SolPerp,
+                perpsfm_core::Market::HypePerp,
+                perpsfm_core::Market::EthPerp,
+            ];
+            let written = perpsfm_train::predict(&cli.root, &markets, lo, hi)?;
+            tracing::info!("predictions written: {written:?}");
+            Ok(())
+        }
+        Cmd::Features => {
+            for m in perpsfm_core::Market::ALL {
+                perpsfm_features::build_features(&cli.root, m)?;
+            }
+            Ok(())
+        }
         Cmd::Train {
             steps,
             seq_len,
@@ -123,6 +165,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Evaluate => perpsfm_eval::run(),
-        Cmd::Backtest => perpsfm_backtest::run(),
+        Cmd::Backtest { min_edge, exposure } => {
+            perpsfm_backtest::report(&cli.root, min_edge, exposure)
+        }
     }
 }

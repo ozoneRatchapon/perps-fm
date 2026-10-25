@@ -210,6 +210,51 @@ pub fn gather_batch(
     }
 }
 
+/// Samples over a single (already normalized) series.
+pub fn collect_slices_samples(s: &MarketSeries, seq_len: usize, lo: i64, hi: i64) -> Vec<Sample> {
+    (0..s.ts.len())
+        .filter(|&t| {
+            let ts = s.ts[t];
+            ts >= lo && ts < hi && t + 1 >= seq_len && s.y_ret[t].is_finite()
+        })
+        .map(|t| Sample { series: 0, t })
+        .collect()
+}
+
+/// Gather a batch from a single series; `samples[i].t` indexes into `s`.
+pub fn gather_window_batch(
+    s: &MarketSeries,
+    samples: &[Sample],
+    seq_len: usize,
+    n_features: usize,
+) -> Batch {
+    let b = samples.len();
+    let mut x = vec![0f32; b * seq_len * n_features];
+    let mut market_ids = Vec::with_capacity(b);
+    let mut y_ret = Vec::with_capacity(b);
+    let mut y_liq = Vec::with_capacity(b);
+    let mut y_vol = Vec::with_capacity(b);
+    for (bi, smp) in samples.iter().enumerate() {
+        market_ids.push(s.market as i64);
+        y_ret.push(s.y_ret[smp.t]);
+        y_liq.push(s.y_liq[smp.t]);
+        y_vol.push(s.y_vol[smp.t]);
+        for (w, row) in s.x[smp.t + 1 - seq_len..=smp.t].iter().enumerate() {
+            let dst = &mut x[bi * seq_len * n_features + w * n_features..][..n_features];
+            for (f, &v) in row.iter().enumerate() {
+                dst[f] = if v.is_finite() { v as f32 } else { 0.0 };
+            }
+        }
+    }
+    Batch {
+        x,
+        market_ids,
+        y_ret,
+        y_liq,
+        y_vol,
+    }
+}
+
 /// Default splits derived from the archive window.
 pub fn default_splits(series: &[MarketSeries]) -> Splits {
     let lo = series
