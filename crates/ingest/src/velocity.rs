@@ -40,23 +40,37 @@ impl Client {
             .build();
         Self {
             agent: config.into(),
-            delay: Duration::from_millis(250),
+            // ~1.6s effective interval incl. round-trip; measured sustainable
+            // (bursts trigger CloudFront 403s that last minutes).
+            delay: Duration::from_millis(1500),
         }
     }
 
     fn get_json(&self, path: &str) -> Result<serde_json::Value> {
         let url = format!("{API_BASE}{path}");
         let mut last_err = None;
-        for attempt in 0..5u32 {
+        // The API sits behind CloudFront, which answers burst traffic with
+        // 403 rather than 429 — treat both as throttle and back off hard.
+        for attempt in 0..8u32 {
             if attempt > 0 {
-                let backoff = self.delay * 2u32.saturating_pow(attempt);
+                let backoff = Duration::from_secs(2u64.saturating_pow(attempt))
+                    + Duration::from_millis((fastrand_u64() % 500) as u64);
+                tracing::warn!("retry {attempt} for {url} after {backoff:?}");
                 std::thread::sleep(backoff);
             }
             match self.agent.get(&url).call() {
                 Ok(mut res) => {
                     let status = res.status().as_u16();
-                    if status == 429 || status >= 500 {
+                    if status == 403 || status == 429 || status >= 500 {
                         last_err = Some(anyhow::anyhow!("HTTP {status} for {url}"));
+                        // WAF penalty windows last minutes — wait it out and
+                        // surface it loudly, or a long backfill sits silent.
+                        if status == 403 || status == 429 {
+                            let penalty = Duration::from_secs(75)
+                                + Duration::from_millis((fastrand_u64() % 30_000) as u64);
+                            tracing::warn!("throttled ({status}); penalty sleep {penalty:?}");
+                            std::thread::sleep(penalty);
+                        }
                         continue;
                     }
                     if status != 200 {
@@ -86,15 +100,21 @@ impl Client {
         let mut out = Vec::new();
         let mut window_end = end_ts; // exclusive
         while window_end > start_ts {
-            let window_start = (window_end - 1000).max(start_ts);
+            // 1000 records x 60s bars per window (limit is a record cap)
+            let window_start = (window_end - 1000 * 60).max(start_ts);
             // NOTE: API wants startTs > endTs and returns descending bars.
             let path = format!(
                 "/market/{symbol}/candles/1?startTs={}&endTs={}&limit=1000",
                 window_end - 1,
                 window_start
             );
+            tracing::debug!("candle window: {path}");
             let v = self.get_json(&path)?;
             let raw: Vec<ApiCandle> = parse_records(&v)?;
+            tracing::debug!(
+                "{symbol}: window [{window_start},{window_end}) -> {} bars",
+                raw.len()
+            );
             if raw.is_empty() {
                 // No data in this window; skip forward to avoid a spin.
                 window_end = window_start;
@@ -182,6 +202,16 @@ fn truncate(s: &str, n: usize) -> &str {
         Some(x) => x,
         None => s,
     }
+}
+
+/// Tiny non-crypto jitter source to avoid synchronized retry storms.
+fn fastrand_u64() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64;
+    nanos.wrapping_mul(0x9E3779B97F4A7C15)
 }
 
 fn parse_records<T: serde::de::DeserializeOwned>(v: &serde_json::Value) -> Result<Vec<T>> {

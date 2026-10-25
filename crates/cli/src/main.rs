@@ -45,10 +45,14 @@ enum Cmd {
     },
     /// Build look-ahead-safe features from curated data.
     Features,
-    /// Train a model (Phase 3).
+    /// Train the pooled transformer on the train split (early-stops on val CRPS).
     Train {
-        #[arg(long, value_enum, default_value_t = perpsfm_train::DeviceChoice::Auto)]
-        device: perpsfm_train::DeviceChoice,
+        #[arg(long, default_value_t = 4000)]
+        steps: usize,
+        #[arg(long, default_value_t = 256)]
+        seq_len: usize,
+        #[arg(long, default_value_t = 64)]
+        batch: usize,
     },
     /// Evaluate on val/sealed splits (Phase 5).
     Evaluate,
@@ -98,7 +102,26 @@ fn main() -> Result<()> {
             ))
         }
         Cmd::Features => perpsfm_features::build_features(&cli.root, perpsfm_core::Market::SolPerp),
-        Cmd::Train { device: _ } => perpsfm_train::train(),
+        Cmd::Train {
+            steps,
+            seq_len,
+            batch,
+        } => {
+            let cfg = perpsfm_train::TrainConfig {
+                steps,
+                seq_len,
+                batch_size: batch,
+                ..Default::default()
+            };
+            let out = perpsfm_train::train_transformer(&cli.root, &cfg)?;
+            tracing::info!(
+                "done: best val CRPS {:.6} @ step {}, checkpoint {}",
+                out.best_val_crps,
+                out.steps_trained,
+                out.checkpoint.display()
+            );
+            Ok(())
+        }
         Cmd::Evaluate => perpsfm_eval::run(),
         Cmd::Backtest => perpsfm_backtest::run(),
     }
