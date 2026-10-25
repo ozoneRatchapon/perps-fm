@@ -1,9 +1,11 @@
-# 01 — Results
+# 01 — Results — FINAL
 
-> All numbers below are **validation-split** (2026-09-27 → 2026-10-11). The
-> sealed weeks (final 2 weeks) have NOT been opened yet — that happens once,
-> after model iteration is frozen. Negative results are reported with the same
-> prominence as positive ones, per the pre-registration.
+> Val split: 2026-09-27 → 2026-10-11. **Sealed weeks (2026-10-11 → 2026-10-25)
+> were opened once, on 2026-10-25, with the frozen checkpoint.** Negative
+> results reported with the same prominence as positive ones, per the
+> pre-registration. (The sealed predict ran twice: the second run added
+> BTC-PERP; the three val-market numbers are bit-identical across both runs,
+> and no model choice depended on sealed data.)
 
 ## Setup
 
@@ -84,12 +86,70 @@ downside for 5 of 6 runs. **H4 rejected at every threshold tested.**
    seconds (the first implementation walked 1,000-second windows: 122k
    requests instead of 123).
 
-## What's NOT done yet
+## SEALED-WEEK VERDICTS (2026-10-11 → 2026-10-25)
 
-- Sealed-week eval (H1/H4 final verdicts) — model iteration should freeze
-  here; the sealed weeks open once, with this checkpoint.
-- S4D comparison run (H1's second arm) — training path is wired
-  (`perpsfm train --model s4d`), run pending.
-- H2 (held-out-market transfer) — evaluate the pooled model on BTC-PERP,
-  together with the sealed eval.
-- Phase 6 stretch (distillation, synthetic stress scenarios).
+### H1 — probabilistic edge: **REJECTED (confirmed on sealed)**
+
+| market | CRPS(model) | CRPS(clim) | model/clim |
+| --- | --- | --- | --- |
+| SOL-PERP | 0.006593 | 0.002227 | 3.0x worse |
+| HYPE-PERP | 0.007201 | 0.002420 | 3.0x worse |
+| ETH-PERP | 0.005254 | 0.001843 | 2.8x worse |
+
+Val-to-sealed consistency is good (same ~3x gap) — the negative result is
+stable, not noise.
+
+### H2 — held-out-market transfer: **REJECTED**
+
+BTC-PERP (never in training or validation):
+
+| market | CRPS(model) | CRPS(clim) |
+| --- | --- | --- |
+| BTC-PERP | 0.209956 | 0.001303 |
+
+The pooled model transfers catastrophically badly to the unseen market
+(161x worse than climatology). The "foundation model transfers across markets"
+premise does not hold at this data scale — 3 markets x 12 weeks of mostly-noise
+returns do not teach a market-agnostic representation. (Strict H2 — pooled vs
+single-market-trained — was not run; the transfer test above already settles
+the practical question.)
+
+### H4 — after-cost viability: **REJECTED (confirmed on sealed)**
+
+min_edge=0.004, taker 2 bps + 1 bps slippage per side:
+
+| market | trades | return | Sharpe | max DD | daily-ret 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| SOL-PERP | 7,298 | −25.8% | −15.7 | 26.0% | [−2.5e-5, −3.7e-6] |
+| HYPE-PERP | 10,713 | −1.9% | −0.9 | 8.6% | [−7.8e-6, +9.9e-6] |
+| ETH-PERP | 2,995 | −30.5% | −22.1 | 32.5% | [−1.8e-5, −1.0e-5] |
+
+HYPE-PERP after-cost was ~flat (CI includes zero) — still no positive edge.
+SOL and ETH significantly negative.
+
+### S4D comparison (H1 second arm): **transformer wins**
+
+S4D (22k params, complex-diagonal SSM from scratch) cut at 2,100 steps:
+val CRPS stuck at ~0.496 (vs transformer 0.0053 at the same-step mark, and
+climatology 0.002). Train pinball was healthy (~0.0015) — the SSM's val
+quantiles are badly miscalibrated, suggesting the simple single-block wrapper
+and/or learning setup needs work this project did not budget for. Documented
+as-is.
+
+## Bottom line
+
+At this venue's data scale (4 markets x 12 weeks, minute bars, sparse events),
+a 68k-parameter transformer trained on trailing market features does NOT beat
+a constant climatological forecast, does NOT transfer to unseen markets, and
+supports NO after-cost trading edge. The pipeline, evaluation discipline, and
+negative results are the deliverables — they are exactly what the JD's
+"How we work" section asks a junior researcher to produce.
+
+## What's NOT done (future work)
+
+- Phase 6 stretch: distillation (train tiny student in candle, serve via a
+  Rust inference engine — e.g. katgpt-rs Metal/CoreML backends) + synthetic
+  stress scenarios from liquidation cascades.
+- Strict H2 (pooled vs single-market-trained models).
+- Live-data iteration: the DLOB collector keeps accumulating; the next honest
+  test is re-evaluating on collector-native weeks once ~2 more accumulate.

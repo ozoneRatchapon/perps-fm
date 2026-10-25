@@ -138,6 +138,7 @@ fn main() -> Result<()> {
                 perpsfm_core::Market::SolPerp,
                 perpsfm_core::Market::HypePerp,
                 perpsfm_core::Market::EthPerp,
+                perpsfm_core::Market::BtcPerp,
             ];
             let written = perpsfm_train::predict(&cli.root, model, &markets, lo, hi)?;
             tracing::info!("predictions written: {written:?}");
