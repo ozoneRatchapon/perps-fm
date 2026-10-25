@@ -194,7 +194,7 @@ impl TinyTransformer {
 pub fn quantile_loss(pred: &Tensor, target: &Tensor, qs: &[f64]) -> Result<Tensor> {
     let device = pred.device();
     let q = Tensor::from_slice(qs, (1, qs.len()), device)?.to_dtype(pred.dtype())?;
-    let t = target.unsqueeze(D::Minus1)?; // (B, 1)
+    let t = target.unsqueeze(D::Minus1)?.to_dtype(pred.dtype())?; // (B, 1)
     let d = t.broadcast_sub(pred)?; // (B, Q)
     let qd = q.broadcast_mul(&d)?;
     let qm1d = ((q - 1.0)?).broadcast_mul(&d)?;

@@ -158,6 +158,15 @@ pub fn train_transformer(root: &Path, cfg: &TrainConfig) -> Result<RunOutput> {
         .map(|s| dataset::normalize(s, &train_stats))
         .collect();
 
+    for s in &train_series {
+        tracing::info!(
+            "series {:?}: ts={} x={} y_ret={}",
+            s.market,
+            s.ts.len(),
+            s.x.len(),
+            s.y_ret.len()
+        );
+    }
     let train_samples = dataset::collect_samples(
         &train_series,
         cfg.seq_len,
