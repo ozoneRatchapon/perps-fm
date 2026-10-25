@@ -4,7 +4,7 @@
 
 pub mod dataset;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Module, Optimizer, VarBuilder, VarMap};
 use polars::prelude::*;
@@ -246,7 +246,23 @@ pub fn train_transformer(root: &Path, cfg: &TrainConfig) -> Result<RunOutput> {
 }
 
 pub fn checkpoint_path(root: &Path) -> PathBuf {
-    root.join("runs").join("transformer.safetensors")
+    latest_checkpoint(root).unwrap_or_else(|| root.join("runs").join("transformer.safetensors"))
+}
+
+/// Newest checkpoint by mtime (predict/evaluate default).
+pub fn latest_checkpoint(root: &Path) -> Option<PathBuf> {
+    let dir = root.join("runs");
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in std::fs::read_dir(&dir).ok()? {
+        let p = e.ok()?.path();
+        if p.extension()?.to_str()? == "safetensors" {
+            let m = p.metadata().ok()?.modified().ok()?;
+            if best.as_ref().map(|(t, _)| m > *t).unwrap_or(true) {
+                best = Some((m, p));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 fn save_checkpoint(
@@ -258,9 +274,12 @@ fn save_checkpoint(
 ) -> Result<()> {
     let dir = root.join("runs");
     std::fs::create_dir_all(&dir)?;
-    varmap.save(dir.join("transformer.safetensors"))?;
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let path = dir.join(format!("transformer-{stamp}.safetensors"));
+    varmap.save(&path)?;
     let meta = serde_json::json!({
         "model": "transformer",
+        "checkpoint": path.file_name().unwrap().to_str().unwrap(),
         "train_config": cfg,
         "model_config": tcfg,
         "quantiles": QUANTILES,
@@ -328,7 +347,7 @@ pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<
     )?)?;
     let tcfg: TransformerConfig = serde_json::from_value(tmeta["model_config"].clone())?;
     let mut varmap = VarMap::new();
-    varmap.load(root.join("runs/transformer.safetensors"))?;
+    varmap.load(latest_checkpoint(root).context("no checkpoint in runs/")?)?;
 
     // Same normalization rule as training: train-split stats over pooled
     // train markets, applied unchanged (no re-estimation at predict time).
