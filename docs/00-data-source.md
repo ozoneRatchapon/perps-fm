@@ -27,7 +27,7 @@ Base: `https://data.velocity.exchange` (OpenAPI at `/openapi.json`).
 
 | Endpoint | Use | Notes |
 | --- | --- | --- |
-| `/market/{sym}/candles/{res}` | 1-min OHLCV backbone | fill **and** oracle OHLC; oracle is continuous even with zero fills. Resolution strings `"1".."240","D","W","M"`, `limit <= 1000`. **`startTs` must be greater than `endTs`** (inverted validation); bars come back descending. |
+| `/market/{sym}/candles/{res}` | 1-min OHLCV backbone | fill **and** oracle OHLC; oracle is continuous even with zero fills. Resolution strings `"1".."240","D","W","M"`, `limit <= 1000`. **`startTs` must be greater than `endTs`** (inverted validation); bars come back descending. `limit` caps RECORDS — a window of 1000 one-minute bars spans 60,000 seconds. The leading edge (~last 20 min) is incomplete: cap backfills at now − 1h. |
 | `/market/{sym}/trades/{y}/{m}/{d}` | fills (order flow) | taker/maker fee + rebate metadata; paginate with `page` until `meta.nextPage` is null; `format=csv` available for bulk. |
 | `/market/{sym}/fundingRates/{y}/{m}/{d}` | hourly funding | 24 records/day. |
 | `/stats/liquidations?days=N` | liquidation events | exchange-wide, rolling window (max 100 days — covers the whole archive anyway). |
@@ -38,6 +38,18 @@ Live: `wss://dlob.velocity.exchange/ws`. Subscribe
 `{"type":"subscribe","channel":"trades","marketType":"perp","market":"SOL-PERP"}` (+ `orderbook`
 with `grouping`). Messages carry `channel` (e.g. `trades_perp_0`) and a `data` field that is
 **often double-encoded JSON** (parse twice). Heartbeats on channel `heartbeat`.
+
+## Client gotchas (all verified the hard way)
+
+- **gzip truncation**: with `accept-encoding: gzip`, the API returns
+  *truncated* bodies (~1KB instead of ~40KB) with HTTP 200. Send identity
+  encoding — the `ingest` crate builds ureq with `default-features = false`
+  so no gzip is negotiated.
+- **Rate limiting**: bursts of fast requests trigger CloudFront 403s that
+  last minutes (not seconds). ~1.6s/request spacing is sustainable; the
+  client backs off 75s+ on 403/429.
+- **Soft-empty leading edge**: requests whose window touches "now" return
+  few or zero bars without any error — always end backfills in the past.
 
 ## Archive reality
 

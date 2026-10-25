@@ -46,7 +46,9 @@ polars = { version = "0.55", features = [
     "is_in",
     "concat_str",
 ] }
-ureq = "3"
+# gzip responses from data.velocity.exchange are truncated server-side;
+# keep identity encoding so we get full bodies.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }

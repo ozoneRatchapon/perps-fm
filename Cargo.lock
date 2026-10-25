@@ -2490,6 +2490,7 @@ dependencies = [
  "anyhow",
  "candle-core",
  "candle-nn",
+ "serde",
 ]
 
 [[package]]
@@ -2499,10 +2500,16 @@ dependencies = [
  "anyhow",
  "candle-core",
  "candle-nn",
+ "chrono",
  "clap",
  "perpsfm-core",
+ "perpsfm-eval",
  "perpsfm-features",
  "perpsfm-model",
+ "polars",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -4525,7 +4532,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde93ff05758a36a851a398a772b0b79a82fbe3c186a46f2696baaeaf84c966b"
 dependencies = [
  "base64 0.23.1",
- "flate2",
  "log",
  "percent-encoding",
  "rustls",

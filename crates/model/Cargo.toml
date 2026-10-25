@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+serde.workspace = true
 candle-core.workspace = true
 candle-nn.workspace = true
 
