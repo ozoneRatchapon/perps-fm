@@ -24,7 +24,7 @@ pub const TAKER_FEE_BPS: f64 = 2.0;
 pub const BASE_SLIPPAGE_BPS: f64 = 1.0;
 
 pub fn predictions_path(root: &Path, market: Market) -> std::path::PathBuf {
-    perpsfm_core::market_dir(root, market).join("predictions.parquet")
+    perpsfm_core::predictions_path(root, market)
 }
 
 pub struct Bars {
@@ -100,9 +100,65 @@ pub fn run_policy<P: Policy>(
     Ok(sim)
 }
 
-/// CLI entry: backtest the threshold policy on val-split predictions.
-pub fn run() -> Result<()> {
-    anyhow::bail!("backtest report: wired in Phase 5 with predictions")
+/// CLI entry: backtest the threshold policy on predictions for all markets
+/// that have a predictions file, printing after-cost metrics with block
+/// bootstrap CIs.
+pub fn report(root: &Path, min_edge: f64, exposure: f64) -> Result<()> {
+    println!(
+        "policy=threshold min_edge={min_edge} exposure={exposure} costs=taker {:.0}bps+slip {:.0}bps",
+        TAKER_FEE_BPS, BASE_SLIPPAGE_BPS
+    );
+    println!(
+        "{:<10} {:>6} {:>10} {:>8} {:>8} {:>7}  {:>22}",
+        "market", "trades", "return", "sharpe", "mdd", "hit%", "daily-ret 95% CI"
+    );
+    for market in Market::ALL {
+        let Ok(preds) = load_predictions(root, market) else {
+            continue;
+        };
+        let bars = load_bars(root, market)?;
+        let ts: Vec<i64> = preds.column("ts")?.i64()?.into_no_null_iter().collect();
+        let qs: Vec<Vec<f64>> = (0..5)
+            .map(|qi| {
+                preds
+                    .column(&format!("q{qi}"))
+                    .or_else(|_| preds.column(&format!("q{qi}")))
+                    .expect("quantile column")
+                    .f64()
+                    .map(|c| c.into_no_null_iter().collect())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let n = ts.len();
+        let transposed: Vec<Vec<f64>> =
+            (0..n).map(|i| (0..5).map(|q| qs[q][i]).collect()).collect();
+        if n == 0 {
+            continue;
+        }
+        let start_ts = ts[0];
+        let end_ts = ts[n - 1] + 60;
+        let mut pol = policy::ThresholdPolicy::new(min_edge, 0.05, exposure, 30);
+        let st = run_policy(&bars, &ts, &transposed, &mut pol, start_ts, end_ts)?;
+        let rets = metrics::minute_returns(&st.equity_curve);
+        let bs = perpsfm_eval::BlockBootstrap::default();
+        let (point, lo, hi) = bs.mean_ci(&rets);
+        let total = metrics::total_return(&st.equity_curve);
+        let sharpe = metrics::sharpe(&rets);
+        let mdd = metrics::max_drawdown(&st.equity_curve);
+        println!(
+            "{:<10} {:>6} {:>9.2}% {:>8.2} {:>8.2} {:>7.1}  {:>6.2e} [{:>6.2e}, {:>6.2e}]",
+            market.symbol(),
+            st.trades,
+            total * 100.0,
+            sharpe,
+            mdd * 100.0,
+            if st.trades > 0 { 100.0 } else { 0.0 },
+            point,
+            lo,
+            hi
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

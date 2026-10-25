@@ -164,6 +164,11 @@ pub fn live_dir(root: &std::path::Path) -> std::path::PathBuf {
     root.join("data").join("live")
 }
 
+/// Model predictions (written by train::predict, read by backtest/eval).
+pub fn predictions_path(root: &std::path::Path, market: Market) -> std::path::PathBuf {
+    market_dir(root, market).join("predictions.parquet")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

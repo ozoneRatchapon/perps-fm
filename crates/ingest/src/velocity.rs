@@ -235,6 +235,7 @@ fn has_next_page(v: &serde_json::Value) -> bool {
 // ---- API wire types (strings for numeric fields, per the API's conventions) ----
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ApiCandle {
     ts: i64,
     #[serde(default)]
@@ -295,6 +296,7 @@ impl F64 {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ApiTrade {
     ts: i64,
     tx_sig: String,
@@ -346,6 +348,7 @@ impl ApiTrade {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ApiFunding {
     ts: i64,
     #[serde(default)]
@@ -386,6 +389,7 @@ impl ApiFunding {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ApiLiquidation {
     ts: i64,
     #[serde(default)]

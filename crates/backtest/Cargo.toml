@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 perpsfm-core.workspace = true
+perpsfm-eval.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 polars.workspace = true
