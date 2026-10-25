@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/ingest",
+    "crates/features",
+    "crates/model",
+    "crates/train",
+    "crates/backtest",
+    "crates/eval",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+perpsfm-core = { path = "crates/core" }
+perpsfm-ingest = { path = "crates/ingest" }
+perpsfm-features = { path = "crates/features" }
+perpsfm-model = { path = "crates/model" }
+perpsfm-train = { path = "crates/train" }
+perpsfm-backtest = { path = "crates/backtest" }
+perpsfm-eval = { path = "crates/eval" }
+
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+polars = { version = "0.55", features = [
+    "lazy",
+    "parquet",
+    "csv",
+    "temporal",
+    "dtype-datetime",
+    "dtype-date",
+    "strings",
+    "round_series",
+    "is_in",
+    "concat_str",
+] }
+ureq = "3"
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+
+candle-core = { version = "0.11", features = ["accelerate"] }
+candle-nn = { version = "0.11", features = ["accelerate"] }
+
+rand = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

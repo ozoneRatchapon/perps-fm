@@ -1,0 +1,10 @@
+[package]
+name = "perpsfm-backtest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+perpsfm-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+polars.workspace = true

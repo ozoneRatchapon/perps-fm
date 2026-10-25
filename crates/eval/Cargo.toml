@@ -1,0 +1,11 @@
+[package]
+name = "perpsfm-eval"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+perpsfm-core.workspace = true
+anyhow.workspace = true
+rand.workspace = true
+tracing.workspace = true
+polars.workspace = true
