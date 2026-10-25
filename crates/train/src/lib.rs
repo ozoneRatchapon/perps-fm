@@ -12,8 +12,9 @@ use rand::SeedableRng;
 use std::path::{Path, PathBuf};
 
 use perpsfm_core::Market;
-use perpsfm_model::transformer::{build as build_transformer, quantile_loss, TransformerConfig};
-use perpsfm_model::QUANTILES;
+use perpsfm_model::s4d;
+use perpsfm_model::transformer::{quantile_loss, TinyTransformer, TransformerConfig};
+use perpsfm_model::{QuantileNet, QUANTILES};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum DeviceChoice {
@@ -71,6 +72,15 @@ pub enum ModelKind {
     S4d,
 }
 
+impl ModelKind {
+    pub fn model_str(self) -> &'static str {
+        match self {
+            ModelKind::Transformer => "transformer",
+            ModelKind::S4d => "s4d",
+        }
+    }
+}
+
 pub struct RunOutput {
     pub checkpoint: PathBuf,
     pub best_val_crps: f64,
@@ -93,6 +103,24 @@ fn bce_with_logits(logits: &Tensor, target: &Tensor) -> Result<Tensor> {
     let sp = softplus(&abs.neg()?)?;
     let xy = logits.broadcast_mul(&target.to_dtype(logits.dtype())?)?;
     Ok((relu - xy + sp)?.mean_all()?)
+}
+
+enum Net {
+    Transformer(TinyTransformer),
+    S4d(s4d::Net),
+}
+
+impl QuantileNet for Net {
+    fn forward(
+        &self,
+        x: &candle_core::Tensor,
+        market_ids: &candle_core::Tensor,
+    ) -> candle_core::Result<perpsfm_model::transformer::TransformerOutput> {
+        match self {
+            Net::Transformer(m) => QuantileNet::forward(m, x, market_ids),
+            Net::S4d(m) => QuantileNet::forward(m, x, market_ids),
+        }
+    }
 }
 
 struct BatchTensors {
@@ -194,8 +222,34 @@ pub fn train_transformer(root: &Path, cfg: &TrainConfig) -> Result<RunOutput> {
         seq_len: cfg.seq_len,
         ..Default::default()
     };
-    let (model, varmap, mut opt) = build_transformer(&tcfg, &dev)?;
-    tracing::info!("transformer params ~{}", tcfg.n_params_estimate());
+    let (net, varmap, mut opt, model_name, n_params) = match cfg.model {
+        ModelKind::Transformer => {
+            let (m, vm, o) = perpsfm_model::transformer::build(&tcfg, &dev)?;
+            (
+                Net::Transformer(m),
+                vm,
+                o,
+                "transformer",
+                tcfg.n_params_estimate(),
+            )
+        }
+        ModelKind::S4d => {
+            let scfg = s4d::S4dConfig {
+                d_model: 64,
+                d_state: 8,
+                seq_len: cfg.seq_len,
+                kernel_len: 128,
+            };
+            let varmap = VarMap::new();
+            s4d::Net::init_vars(&scfg, 4, n_features, 2, &varmap, &dev)?;
+            let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
+            let m = s4d::Net::new(&scfg, 4, n_features, 2, vs)?;
+            let n = m.n_params_estimate;
+            let o = perpsfm_model::transformer::optimizer(varmap.all_vars(), cfg.lr)?;
+            (Net::S4d(m), varmap, o, "s4d", n)
+        }
+    };
+    tracing::info!("{model_name} params ~{n_params}");
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(cfg.seed);
     let mut best_crps = f64::INFINITY;
@@ -210,7 +264,7 @@ pub fn train_transformer(root: &Path, cfg: &TrainConfig) -> Result<RunOutput> {
         let batch =
             dataset::gather_batch(&train_series, &train_samples, &idx, cfg.seq_len, n_features);
         let b = to_device(&batch, n_features, cfg.seq_len, &dev)?;
-        let out = model.forward(&b.x, &b.market_ids)?;
+        let out = net.forward(&b.x, &b.market_ids)?;
         let loss = quantile_loss(&out.ret_quantiles, &b.y_ret, &QUANTILES)?;
         opt.backward_step(&loss)?;
 
@@ -275,10 +329,10 @@ fn save_checkpoint(
     let dir = root.join("runs");
     std::fs::create_dir_all(&dir)?;
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let path = dir.join(format!("transformer-{stamp}.safetensors"));
+    let path = dir.join(format!("{}-{stamp}.safetensors", cfg.model.model_str()));
     varmap.save(&path)?;
     let meta = serde_json::json!({
-        "model": "transformer",
+        "model": cfg.model.model_str(),
         "checkpoint": path.file_name().unwrap().to_str().unwrap(),
         "train_config": cfg,
         "model_config": tcfg,
@@ -304,6 +358,7 @@ pub fn eval_crps(
     let vs = VarBuilder::from_varmap(varmap, DType::F32, dev);
     let model = perpsfm_model::transformer::TinyTransformer::new(tcfg, vs)?;
     let n_features = series[0].n_features();
+    let _ = &model;
     let mut preds: Vec<Vec<f64>> = Vec::with_capacity(samples.len());
     let mut actual: Vec<f64> = Vec::with_capacity(samples.len());
     let mut rng = rand::rngs::StdRng::seed_from_u64(cfg.seed ^ 0xA11CE);
@@ -362,8 +417,20 @@ pub fn predict(root: &Path, markets: &[Market], lo: i64, hi: i64) -> Result<Vec<
     );
 
     let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-    let model = perpsfm_model::transformer::TinyTransformer::new(&tcfg, vs)?;
+    let model_kind: ModelKind = serde_json::from_value(tmeta["model"].clone())?;
     let n_features = all[0].n_features();
+    let model: Net = match model_kind {
+        ModelKind::Transformer => Net::Transformer(TinyTransformer::new(&tcfg, vs)?),
+        ModelKind::S4d => {
+            let scfg = s4d::S4dConfig {
+                d_model: 64,
+                d_state: 8,
+                seq_len: tcfg.seq_len,
+                kernel_len: 128,
+            };
+            Net::S4d(s4d::Net::new(&scfg, 4, n_features, 2, vs)?)
+        }
+    };
 
     let mut written = Vec::new();
     for m in markets {
