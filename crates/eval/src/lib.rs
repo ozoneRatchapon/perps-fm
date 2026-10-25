@@ -180,6 +180,7 @@ pub fn run() -> anyhow::Result<()> {
         perpsfm_core::Market::SolPerp,
         perpsfm_core::Market::HypePerp,
         perpsfm_core::Market::EthPerp,
+        perpsfm_core::Market::BtcPerp,
     ];
 
     // climatological baseline: empirical quantiles of train-split fwd returns
