@@ -1,5 +1,6 @@
 /target
 /data
+/runs
 *.parquet
 .DS_Store
 .env
