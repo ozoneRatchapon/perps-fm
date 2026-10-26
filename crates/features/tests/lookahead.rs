@@ -116,8 +116,8 @@ fn vol_burst_threshold_semantics() {
     // 2880 minutes: quiet, then a 30-minute explosion
     let n = 2880;
     let mut qv = vec![1.0; n];
-    for i in 2000..2030 {
-        qv[i] = 1000.0; // forward window of t=1999 sees 30m of 1000.0
+    for v in &mut qv[2000..2030] {
+        *v = 1000.0; // forward window of t=1999 sees 30m of 1000.0
     }
     let burst_at = 1999;
     let suffix: Vec<f64> = {

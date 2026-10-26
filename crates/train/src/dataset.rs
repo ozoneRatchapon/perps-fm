@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn normalization_uses_only_train_range() {
         let s = dummy_series();
-        let series = vec![s];
+        let series = [s];
         let train_hi = series[0].ts[300];
         let stats = norm_stats(&series.iter().collect::<Vec<_>>(), 0, train_hi);
         // feature 0 ranges over [0,300) * 1.0 -> mean ~149.5

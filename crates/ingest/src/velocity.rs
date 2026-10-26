@@ -54,7 +54,7 @@ impl Client {
         for attempt in 0..8u32 {
             if attempt > 0 {
                 let backoff = Duration::from_secs(2u64.saturating_pow(attempt))
-                    + Duration::from_millis((fastrand_u64() % 500) as u64);
+                    + Duration::from_millis(fastrand_u64() % 500);
                 tracing::warn!("retry {attempt} for {url} after {backoff:?}");
                 std::thread::sleep(backoff);
             }
@@ -67,7 +67,7 @@ impl Client {
                         // surface it loudly, or a long backfill sits silent.
                         if status == 403 || status == 429 {
                             let penalty = Duration::from_secs(75)
-                                + Duration::from_millis((fastrand_u64() % 30_000) as u64);
+                                + Duration::from_millis(fastrand_u64() % 30_000);
                             tracing::warn!("throttled ({status}); penalty sleep {penalty:?}");
                             std::thread::sleep(penalty);
                         }

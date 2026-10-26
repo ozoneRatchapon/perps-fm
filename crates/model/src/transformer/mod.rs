@@ -10,7 +10,7 @@
 
 use candle_core::{DType, Device, Result, Tensor, D};
 use candle_nn::{
-    layer_norm, linear, ops, Activation, AdamW, LayerNorm, Linear, Module, Optimizer, ParamsAdamW,
+    layer_norm, linear, ops, Activation, AdamW, LayerNorm, Linear, Optimizer, ParamsAdamW,
     VarBuilder, VarMap,
 };
 
@@ -203,7 +203,7 @@ pub fn quantile_loss(pred: &Tensor, target: &Tensor, qs: &[f64]) -> Result<Tenso
 
 /// AdamW with modest weight decay.
 pub fn optimizer(vars: Vec<candle_core::Var>, lr: f64) -> Result<AdamW> {
-    Ok(AdamW::new(
+    AdamW::new(
         vars,
         ParamsAdamW {
             lr,
@@ -212,7 +212,7 @@ pub fn optimizer(vars: Vec<candle_core::Var>, lr: f64) -> Result<AdamW> {
             eps: 1e-8,
             weight_decay: 0.01,
         },
-    )?)
+    )
 }
 
 /// Allocate the model + optimizer on a device.

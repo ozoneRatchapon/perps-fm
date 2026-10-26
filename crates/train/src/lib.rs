@@ -6,7 +6,7 @@ pub mod dataset;
 
 use anyhow::{Context as _, Result};
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{Module, Optimizer, VarBuilder, VarMap};
+use candle_nn::{Optimizer, VarBuilder, VarMap};
 use polars::prelude::*;
 use rand::SeedableRng;
 use std::path::{Path, PathBuf};
