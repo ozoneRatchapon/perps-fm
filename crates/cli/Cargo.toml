@@ -24,3 +24,8 @@ candle-core.workspace = true
 
 [features]
 metal = ["perpsfm-train/metal"]
+
+# Apple Accelerate BLAS is macOS-only; CI (linux) builds candle without it.
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { workspace = true, features = ["accelerate"] }
+candle-nn = { workspace = true, features = ["accelerate"] }
