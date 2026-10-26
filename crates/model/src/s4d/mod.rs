@@ -191,7 +191,7 @@ impl Net {
         n_blocks: usize,
         vs: VarBuilder,
     ) -> Result<Self> {
-        use candle_nn::{embedding, layer_norm, linear};
+        use candle_nn::{layer_norm, linear};
         let d = cfg.d_model;
         let blocks = (0..n_blocks)
             .map(|i| S4dBlock::new(cfg.clone(), vs.pp(format!("block_{i}"))))
@@ -220,7 +220,6 @@ impl crate::QuantileNet for Net {
         x: &candle_core::Tensor,
         market_ids: &candle_core::Tensor,
     ) -> Result<crate::transformer::TransformerOutput> {
-        use candle_nn::Module;
         let mut h = x.apply(&self.proj_in)?;
         let emb = market_ids.apply(&self.market_emb)?.unsqueeze(1)?;
         h = h.broadcast_add(&emb)?;
@@ -257,7 +256,7 @@ mod tests {
             seq_len: 8,
             kernel_len: 8,
         };
-        let mut vm = VarMap::new();
+        let vm = VarMap::new();
         S4dBlock::init_vars(&cfg, &vm, &dev)?;
         {
             let mut m = vm.data().lock().unwrap();
@@ -297,7 +296,7 @@ mod tests {
             seq_len: 32,
             kernel_len: 16,
         };
-        let mut vm = VarMap::new();
+        let vm = VarMap::new();
         S4dBlock::init_vars(&cfg, &vm, &dev)?;
         let vs = VarBuilder::from_varmap(&vm, DType::F32, &dev);
         let blk = S4dBlock::new(cfg, vs)?;

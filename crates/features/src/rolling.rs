@@ -153,7 +153,7 @@ impl RollingCountSum {
             self.head = (self.head + 1) % self.window;
         }
         // window <= 1440: exact fold is cheap and avoids drift
-        self.count = self.cnt.iter().fold(0u32, |acc, &c| acc + c);
+        self.count = self.cnt.iter().sum::<u32>();
         let s = self.sum.push(value)?;
         Some((self.count as u64, s))
     }
